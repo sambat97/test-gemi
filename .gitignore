@@ -29,3 +29,11 @@ Thumbs.db
 
 # Telegram bot specific
 *.session
+
+# Test files
+test_*.png
+*.png
+
+# Railway & Nixpacks
+.nixpacks/
+.railway/
