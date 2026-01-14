@@ -1,0 +1,17 @@
+# SheerID Telegram Bot - Python Dependencies
+# Install dengan: pip install -r requirements.txt
+
+# Core HTTP client
+httpx>=0.25.0
+
+# Telegram Bot Framework
+python-telegram-bot>=20.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Image generation
+Pillow>=10.0.0
+
+# Optional: untuk better performance
+# uvloop>=0.19.0  # Uncomment jika di Linux/macOS
