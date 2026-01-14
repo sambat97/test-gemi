@@ -37,3 +37,7 @@ test_*.png
 # Railway & Nixpacks
 .nixpacks/
 .railway/
+
+# Docker
+.dockerignore
+docker-compose*.yml
