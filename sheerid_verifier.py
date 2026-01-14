@@ -2,6 +2,8 @@
 import re
 import random
 import logging
+import time
+import hashlib
 import httpx
 from typing import Dict, Optional, Tuple
 
@@ -9,10 +11,12 @@ try:
     from . import config
     from .name_generator import NameGenerator, generate_birth_date
     from .img_generator import generate_image, generate_psu_email
+    from .transcript_generator import generate_transcript
 except ImportError:
     import config
     from name_generator import NameGenerator, generate_birth_date
     from img_generator import generate_image, generate_psu_email
+    from transcript_generator import generate_transcript
 
 # Configure logging
 logging.basicConfig(
@@ -37,10 +41,31 @@ class SheerIDVerifier:
 
     @staticmethod
     def _generate_device_fingerprint() -> str:
-        """Generate more realistic device fingerprint (64 chars)"""
-        chars = '0123456789abcdef'
-        # Make it longer and more realistic like real browser fingerprints
-        return ''.join(random.choice(chars) for _ in range(64))
+        """Generate realistic browser fingerprint to avoid fraud detection"""
+        # Realistic screen resolutions
+        resolutions = ["1920x1080", "1366x768", "1536x864", "1440x900", "1280x720", "2560x1440"]
+        # Common timezones
+        timezones = ["-8", "-7", "-6", "-5", "-4", "0", "1", "2", "3", "5.5", "8", "9", "10"]
+        # Common languages
+        languages = ["en-US", "en-GB", "en-CA", "en-AU", "es-ES", "fr-FR", "de-DE", "pt-BR"]
+        # Common platforms
+        platforms = ["Win32", "MacIntel", "Linux x86_64"]
+        # Browser vendors
+        vendors = ["Google Inc.", "Apple Computer, Inc.", ""]
+        
+        components = [
+            str(int(time.time() * 1000)),
+            str(random.random()),
+            random.choice(resolutions),
+            str(random.choice(timezones)),
+            random.choice(languages),
+            random.choice(platforms),
+            random.choice(vendors),
+            str(random.randint(1, 16)),  # hardware concurrency (CPU cores)
+            str(random.randint(2, 32)),  # device memory GB
+            str(random.randint(0, 1)),   # touch support
+        ]
+        return hashlib.md5("|".join(components).encode()).hexdigest()
 
     @staticmethod
     def normalize_url(url: str) -> str:
@@ -183,11 +208,20 @@ class SheerIDVerifier:
             logger.info(f"Tanggal Lahir: {birth_date}")
             logger.info(f"Verification ID: {self.verification_id}")
 
-            # Generate student ID PNG
-            logger.info("Langkah 1/4: Generate student ID PNG...")
-            img_data = generate_image(first_name, last_name, school_id)
+            # Generate document (70% transcript, 30% Penn State screenshot)
+            doc_type = "transcript" if random.random() < 0.7 else "screenshot"
+            
+            if doc_type == "transcript":
+                logger.info("Langkah 1/4: Generate academic transcript...")
+                img_data = generate_transcript(first_name, last_name, school['name'], birth_date)
+                filename = "transcript.png"
+            else:
+                logger.info("Langkah 1/4: Generate student ID screenshot...")
+                img_data = generate_image(first_name, last_name, school_id)
+                filename = "student_card.png"
+            
             file_size = len(img_data)
-            logger.info(f"✅ Ukuran PNG: {file_size / 1024:.2f}KB")
+            logger.info(f"✅ Ukuran {doc_type}: {file_size / 1024:.2f}KB")
 
             # Submit student information (only if needed)
             if current_step in ["collectStudentPersonalInfo", "initial", "unknown"]:
@@ -251,7 +285,7 @@ class SheerIDVerifier:
             logger.info("Langkah 4/4: Request dan upload dokumen...")
             step4_body = {
                 "files": [
-                    {"fileName": "student_card.png", "mimeType": "image/png", "fileSize": file_size}
+                    {"fileName": filename, "mimeType": "image/png", "fileSize": file_size}
                 ]
             }
             step4_data, step4_status = self._sheerid_request(
