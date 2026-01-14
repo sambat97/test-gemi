@@ -99,6 +99,24 @@ class SheerIDVerifier:
             logger.error(f"S3 upload failed: {e}")
             return False
 
+    def get_verification_status(self) -> Dict:
+        """Get current verification status"""
+        try:
+            status_url = f"{config.SHEERID_BASE_URL}/rest/v2/verification/{self.verification_id}"
+            headers = {
+                "Accept": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            }
+            response = self.http_client.get(status_url, headers=headers)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"Failed to get status: {response.status_code}")
+                return {"currentStep": "unknown"}
+        except Exception as e:
+            logger.error(f"Error getting verification status: {e}")
+            return {"currentStep": "unknown"}
+
     def verify(
         self,
         first_name: str = None,
@@ -109,8 +127,43 @@ class SheerIDVerifier:
     ) -> Dict:
         """Execute verification flow"""
         try:
-            current_step = "initial"
+            # Check current verification status first
+            logger.info("📊 Mengecek status verification...")
+            current_status = self.get_verification_status()
+            current_step = current_status.get("currentStep", "initial")
+            
+            logger.info(f"📋 Status saat ini: {current_step}")
+            logger.info(f"📋 Full status: {current_status}")
 
+            # Handle based on current step
+            if current_step == "pending":
+                return {
+                    "success": True,
+                    "pending": True,
+                    "message": "Verification sudah disubmit sebelumnya, menunggu review",
+                    "verification_id": self.verification_id,
+                    "status": current_status,
+                }
+            
+            elif current_step == "success":
+                return {
+                    "success": True,
+                    "pending": False,
+                    "message": "✅ Verification sudah berhasil sebelumnya!",
+                    "verification_id": self.verification_id,
+                    "status": current_status,
+                }
+            
+            elif current_step == "error":
+                error_msg = ", ".join(current_status.get("errorIds", ["Unknown error"]))
+                return {
+                    "success": False,
+                    "message": f"Verification error: {error_msg}",
+                    "verification_id": self.verification_id,
+                    "status": current_status,
+                }
+
+            # Prepare student data
             if not first_name or not last_name:
                 name = NameGenerator.generate()
                 first_name = name["first_name"]
@@ -136,47 +189,50 @@ class SheerIDVerifier:
             file_size = len(img_data)
             logger.info(f"✅ Ukuran PNG: {file_size / 1024:.2f}KB")
 
-            # Submit student information
-            logger.info("Langkah 2/4: Submit info mahasiswa...")
-            step2_body = {
-                "firstName": first_name,
-                "lastName": last_name,
-                "birthDate": birth_date,
-                "email": email,
-                "phoneNumber": "",
-                "organization": {
-                    "id": int(school_id),
-                    "idExtended": school["idExtended"],
-                    "name": school["name"],
-                },
-                "deviceFingerprintHash": self.device_fingerprint,
-                "locale": "en-US",
-                "metadata": {
-                    "marketConsentValue": False,
-                    "refererUrl": f"{config.SHEERID_BASE_URL}/verify/{config.PROGRAM_ID}/?verificationId={self.verification_id}",
-                    "verificationId": self.verification_id,
-                    "flags": '{"collect-info-step-email-first":"default","doc-upload-considerations":"default","doc-upload-may24":"default","doc-upload-redesign-use-legacy-message-keys":false,"docUpload-assertion-checklist":"default","font-size":"default","include-cvec-field-france-student":"not-labeled-optional"}',
-                    "submissionOptIn": "By submitting the personal information above, I acknowledge that my personal information is being collected under the privacy policy of the business from which I am seeking a discount",
-                },
-            }
+            # Submit student information (only if needed)
+            if current_step in ["collectStudentPersonalInfo", "initial", "unknown"]:
+                logger.info("Langkah 2/4: Submit info mahasiswa...")
+                step2_body = {
+                    "firstName": first_name,
+                    "lastName": last_name,
+                    "birthDate": birth_date,
+                    "email": email,
+                    "phoneNumber": "",
+                    "organization": {
+                        "id": int(school_id),
+                        "idExtended": school["idExtended"],
+                        "name": school["name"],
+                    },
+                    "deviceFingerprintHash": self.device_fingerprint,
+                    "locale": "en-US",
+                    "metadata": {
+                        "marketConsentValue": False,
+                        "refererUrl": f"{config.SHEERID_BASE_URL}/verify/{config.PROGRAM_ID}/?verificationId={self.verification_id}",
+                        "verificationId": self.verification_id,
+                        "flags": '{"collect-info-step-email-first":"default","doc-upload-considerations":"default","doc-upload-may24":"default","doc-upload-redesign-use-legacy-message-keys":false,"docUpload-assertion-checklist":"default","font-size":"default","include-cvec-field-france-student":"not-labeled-optional"}',
+                        "submissionOptIn": "By submitting the personal information above, I acknowledge that my personal information is being collected under the privacy policy of the business from which I am seeking a discount",
+                    },
+                }
 
-            step2_data, step2_status = self._sheerid_request(
-                "POST",
-                f"{config.SHEERID_BASE_URL}/rest/v2/verification/{self.verification_id}/step/collectStudentPersonalInfo",
-                step2_body,
-            )
+                step2_data, step2_status = self._sheerid_request(
+                    "POST",
+                    f"{config.SHEERID_BASE_URL}/rest/v2/verification/{self.verification_id}/step/collectStudentPersonalInfo",
+                    step2_body,
+                )
 
-            if step2_status != 200:
-                logger.error(f"Response Step 2: {step2_data}")
-                raise Exception(f"Langkah 2 gagal (status {step2_status}): {step2_data}")
-            if step2_data.get("currentStep") == "error":
-                error_msg = ", ".join(step2_data.get("errorIds", ["Unknown error"]))
-                logger.error(f"Error IDs: {error_msg}")
-                raise Exception(f"Langkah 2 error: {error_msg}")
+                if step2_status != 200:
+                    logger.error(f"Response Step 2: {step2_data}")
+                    raise Exception(f"Langkah 2 gagal (status {step2_status}): {step2_data}")
+                if step2_data.get("currentStep") == "error":
+                    error_msg = ", ".join(step2_data.get("errorIds", ["Unknown error"]))
+                    logger.error(f"Error IDs: {error_msg}")
+                    raise Exception(f"Langkah 2 error: {error_msg}")
 
-            logger.info(f"✅ Langkah 2 selesai: {step2_data.get('currentStep')}")
-            logger.info(f"📋 Full response step 2: {step2_data}")
-            current_step = step2_data.get("currentStep", current_step)
+                logger.info(f"✅ Langkah 2 selesai: {step2_data.get('currentStep')}")
+                logger.info(f"📋 Full response step 2: {step2_data}")
+                current_step = step2_data.get("currentStep", current_step)
+            else:
+                logger.info(f"⏭️ Skip langkah 2 (current step: {current_step})")
 
             # Skip SSO if needed
             if current_step in ["sso", "collectStudentPersonalInfo"]:
