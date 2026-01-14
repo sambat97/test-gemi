@@ -13,5 +13,8 @@ python-dotenv>=1.0.0
 # Image generation
 Pillow>=10.0.0
 
+# Browser automation for screenshot generation
+playwright>=1.40.0
+
 # Optional: untuk better performance
 # uvloop>=0.19.0  # Uncomment jika di Linux/macOS
